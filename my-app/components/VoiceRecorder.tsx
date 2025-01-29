@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Button } from "@/components/ui/button"
 import { Mic, Square } from 'lucide-react'
-import * as franc from 'franc-min'  // Correctly import franc-min
+import * as franc from 'franc-min'
 
 interface VoiceRecorderProps {
   onTranscript: (transcript: string, language: string) => void;
@@ -10,8 +9,10 @@ interface VoiceRecorderProps {
 
 export default function VoiceRecorder({ onTranscript }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
-  const [detectedLanguage, setDetectedLanguage] = useState<string>('en') // Default to English
+  const [detectedLanguage, setDetectedLanguage] = useState<string>('en')
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
 
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
@@ -25,26 +26,54 @@ export default function VoiceRecorder({ onTranscript }: VoiceRecorderProps) {
           .map(result => result[0].transcript)
           .join('')
 
-        // Use franc-min to detect the language of the transcript
-        const language = franc.franc(transcript)  // Call the franc function explicitly
+        const language = franc.franc(transcript)
         setDetectedLanguage(language)
-        onTranscript(transcript, language)  // Send both transcript and language
+        onTranscript(transcript, language)
       }
     }
   }, [onTranscript])
 
-  const startRecording = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.start()
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaRecorderRef.current = new MediaRecorder(stream)
+      chunksRef.current = []
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        chunksRef.current.push(event.data)
+      }
+
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(chunksRef.current, { type: 'audio/wav' })
+        const url = URL.createObjectURL(audioBlob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `audio.wav`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
+
+      mediaRecorderRef.current.start()
+      if (recognitionRef.current) {
+        recognitionRef.current.start()
+      }
       setIsRecording(true)
+    } catch (err) {
+      console.error('Error accessing microphone:', err)
     }
   }
 
   const stopRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
+    }
     if (recognitionRef.current) {
       recognitionRef.current.stop()
-      setIsRecording(false)
     }
+    setIsRecording(false)
   }
 
   return (
